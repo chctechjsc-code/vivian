@@ -370,7 +370,48 @@ const ACT = {
   seedData: async () => { if (await confirmBox('Thay toàn bộ dữ liệu hiện tại bằng dữ liệu mẫu?', { ok: 'Tạo mẫu', danger: true })) { const keep = db.settings; db = seedDB(); db.settings = keep; save(); render(); toast('Đã tạo dữ liệu mẫu'); } },
   wipeData: async () => { if (await confirmBox('Xóa sạch mọi việc, nhắc, chi tiêu, ghi chú, dự án và thói quen? Không thể hoàn tác — nên xuất sao lưu trước.', { ok: 'Xóa sạch', danger: true })) { const keep = db.settings, cats = db.categories; db = emptyDB(); db.settings = keep; db.categories = cats; save(); render(); toast('Đã xóa sạch — bầu trời mới tinh ☁'); } },
   runTests: () => { lastTests = runSelfTests(); render(); },
+  cloudSignUp: async el => {
+    const f = el.closest('form'); if (!f.reportValidity()) return;
+    try {
+      const needConfirm = await Cloud.signUp(f.email.value.trim(), f.password.value);
+      if (needConfirm) toast('Đã gửi email xác nhận — mở hộp thư và bấm vào link nhé 💌', { timeout: 7000 });
+      else toast('Tạo tài khoản xong ☁');
+    } catch (e) { toast(authMsg(e), { type: 'error', timeout: 5000 }); }
+  },
+  cloudReset: async el => {
+    const f = el.closest('form'), email = f.email.value.trim();
+    if (!email) { f.email.focus(); return toast('Nhập email trước nhé', { type: 'error' }); }
+    try { await Cloud.resetPassword(email); toast('Đã gửi email đặt lại mật khẩu 💌', { timeout: 6000 }); }
+    catch (e) { toast(authMsg(e), { type: 'error', timeout: 5000 }); }
+  },
+  cloudSync: () => Cloud.sync().then(() => Cloud.status === 'ok' && toast('Đã đồng bộ ☁')),
+  cloudSignOut: async () => {
+    if (await confirmBox('Đăng xuất khỏi đồng bộ? Dữ liệu trên máy này vẫn giữ nguyên.', { ok: 'Đăng xuất' })) { await Cloud.signOut(); render(); }
+  },
 };
+
+function authMsg(e) {
+  const m = (e && e.message) || String(e);
+  if (/Invalid login credentials/i.test(m)) return 'Sai email hoặc mật khẩu';
+  if (/Email not confirmed/i.test(m)) return 'Email chưa xác nhận — mở hộp thư và bấm link xác nhận nhé';
+  if (/already registered|already exists/i.test(m)) return 'Email này đã có tài khoản — bấm Đăng nhập';
+  if (/Password should be at least/i.test(m)) return 'Mật khẩu cần ít nhất 6 ký tự';
+  if (/rate limit|too many/i.test(m)) return 'Thử nhiều lần quá — đợi một lát rồi thử lại';
+  if (/Failed to fetch|NetworkError/i.test(m)) return 'Không kết nối được máy chủ — kiểm tra mạng';
+  return m;
+}
+function newPasswordModal() {
+  openModal({
+    title: 'Đặt mật khẩu mới', size: 'sm',
+    body: `<label class="lbl">Mật khẩu mới<input class="field" name="pw" type="password" minlength="6" autocomplete="new-password" required autofocus></label>`,
+    foot: `<span class="sp"></span><button type="submit" class="btn primary">Lưu mật khẩu</button>`,
+    onSubmit: fd => {
+      const pw = fd.get('pw');
+      if (!pw || pw.length < 6) { toast('Mật khẩu cần ít nhất 6 ký tự', { type: 'error' }); return false; }
+      Cloud.updatePassword(pw).then(() => toast('Đã đổi mật khẩu ✓')).catch(e => toast(authMsg(e), { type: 'error' }));
+    },
+  });
+}
 
 const SUBMIT = {
   quickTask: f => { const v = f.title.value.trim(); if (!v) return; db.tasks.push({ id: uid(), title: v, note: '', cat: db.categories[0].id, status: 'todo', date: today(), time: '', deadline: '', repeat: 'none', doneDates: [], projectId: '', priority: false, archived: false, createdAt: Date.now(), doneAt: null }); save(); render(); $('.quick-add input')?.focus(); },
@@ -387,6 +428,11 @@ const SUBMIT = {
   },
   addHabit: f => { const fd = new FormData(f); const name = fd.get('name').trim(); if (!name) return; db.habits.push({ id: uid(), name, emo: fd.get('emo').trim() || '✨', color: fd.get('color'), log: {} }); save(); render(); },
   saveProfile: f => { const fd = new FormData(f); db.settings.name = fd.get('name').trim() || 'Thanh Vân'; db.settings.nick = fd.get('nick').trim() || 'Vân'; db.settings.budget = parseMoney(fd.get('budget')); save(); render(); toast('Đã lưu hồ sơ'); },
+  cloudSignIn: async f => {
+    const btn = f.querySelector('[type=submit]'); btn.disabled = true;
+    try { await Cloud.signIn(f.email.value.trim(), f.password.value); toast('Đăng nhập thành công ☁'); render(); }
+    catch (e) { toast(authMsg(e), { type: 'error', timeout: 5000 }); btn.disabled = false; }
+  },
   addCat: f => { const name = f.name.value.trim(); if (!name) return; const keys = Object.keys(COLORS); db.categories.push({ id: uid(), name, color: keys[db.categories.length % keys.length] }); save(); render(); },
 };
 
@@ -565,5 +611,6 @@ function boot() {
     if (today() !== ui.lastDay) { ui.lastDay = today(); render(); } // qua nửa đêm
   }, 15000);
   setTimeout(checkReminders, 1500);
+  Cloud.init();
 }
 boot();

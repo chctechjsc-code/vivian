@@ -531,9 +531,11 @@ Views.settings = () => {
       <div class="row"><button type="button" class="btn ghost" data-act="askNotify">Bật thông báo</button><button type="button" class="btn ghost" data-act="testChime">${icon('bell', 15)} Thử chuông</button></div>
     </section>
 
+    ${cloudCard()}
+
     <section class="glass card stack">
       <h3>${icon('archive', 18)} Dữ liệu</h3>
-      <p class="muted small">Mọi thứ được lưu ngay trong trình duyệt này, không gửi đi đâu cả. Nên xuất bản sao lưu thỉnh thoảng nhé.</p>
+      <p class="muted small">${Cloud.user ? 'Dữ liệu được lưu trong trình duyệt và tự sao lên đám mây.' : 'Mọi thứ đang lưu ngay trong trình duyệt này.'} Thỉnh thoảng xuất thêm một bản sao lưu cho chắc nhé.</p>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn ghost" data-act="exportData">${icon('download', 15)} Xuất sao lưu</button>
         <label class="btn ghost">${icon('upload', 15)} Nhập sao lưu<input type="file" accept="application/json,.json" hidden data-change="importData"></label>
@@ -552,6 +554,39 @@ Views.settings = () => {
   </div>
   <p class="love">Vivian — một bầu trời nhỏ làm riêng cho ${esc(s.name)} ☁</p>`;
 };
+
+/* ---------- Thẻ đồng bộ đám mây (trang Cài đặt) ---------- */
+function cloudCard() {
+  if (!Cloud.configured()) return `<section class="glass card stack" id="cloud-card">
+      <h3>${icon('cloud', 18)} Đồng bộ đám mây</h3>
+      <p class="muted small">Chưa kết nối máy chủ. Điền <code>url</code> và <code>anonKey</code> của Supabase vào <code>js/config.js</code> để bật.</p></section>`;
+  const u = Cloud.user;
+  if (!u) return `<form class="glass card stack" id="cloud-card" data-submit="cloudSignIn">
+      <h3>${icon('cloud', 18)} Đồng bộ đám mây</h3>
+      <p class="muted small">Đăng nhập để dữ liệu tự đồng bộ giữa điện thoại và máy tính, đổi máy cũng không mất.</p>
+      <label class="lbl">Email<input class="field" name="email" type="email" autocomplete="email" required></label>
+      <label class="lbl">Mật khẩu<input class="field" name="password" type="password" autocomplete="current-password" minlength="6" required></label>
+      <div class="row" style="flex-wrap:wrap">
+        <button class="btn primary" type="submit">Đăng nhập</button>
+        <button class="btn ghost" type="button" data-act="cloudSignUp">Tạo tài khoản</button>
+        <button class="link-btn" type="button" data-act="cloudReset">Quên mật khẩu?</button>
+      </div></form>`;
+  const st = Cloud.status;
+  const line = {
+    syncing: 'Đang đồng bộ…',
+    ok: `Đã đồng bộ lúc ${new Date(Cloud.lastAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`,
+    error: `Lỗi: ${esc(Cloud.error)}`,
+    offline: 'Đang mất mạng — dữ liệu vẫn lưu trên máy, có mạng sẽ tự đồng bộ.',
+  }[st] || '';
+  return `<section class="glass card stack" id="cloud-card">
+      <h3>${icon('cloud', 18)} Đồng bộ đám mây</h3>
+      <p class="small">Đang đăng nhập: <b>${esc(u.email)}</b></p>
+      <p class="muted small sync-line" data-state="${st}">${line}</p>
+      <div class="row" style="flex-wrap:wrap">
+        <button type="button" class="btn ghost" data-act="cloudSync">${icon('repeat', 15)} Đồng bộ ngay</button>
+        <button type="button" class="btn ghost" data-act="cloudSignOut">Đăng xuất</button>
+      </div></section>`;
+}
 
 /* ---------- Phép thử logic ---------- */
 function runSelfTests() {

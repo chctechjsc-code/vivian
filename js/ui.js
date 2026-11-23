@@ -31,13 +31,13 @@ function closeModal(silent = false) {
 }
 function refreshModal() { modalState && modalState.refresh && modalState.refresh(); }
 
-function confirmBox(msg, { ok = 'Đồng ý', danger = false, title = 'Xác nhận' } = {}) {
+function confirmBox(msg, { ok = 'Đồng ý', cancel = 'Hủy', danger = false, title = 'Xác nhận' } = {}) {
   return new Promise(resolve => {
     let done = false;
     openModal({
       title, size: 'sm',
       body: `<p class="confirm-msg">${msg}</p>`,
-      foot: `<span class="sp"></span><button type="button" class="btn ghost" data-act="closeModal">Hủy</button><button type="submit" class="btn ${danger ? 'danger' : 'primary'}" autofocus>${ok}</button>`,
+      foot: `<span class="sp"></span><button type="button" class="btn ghost" data-act="closeModal">${cancel}</button><button type="submit" class="btn ${danger ? 'danger' : 'primary'}" autofocus>${ok}</button>`,
       onSubmit: () => { done = true; resolve(true); },
       onClose: () => { if (!done) resolve(false); },
     });

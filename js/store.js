@@ -63,7 +63,7 @@ function loadDB() {
     if (raw) { db = migrate(JSON.parse(raw)); return; }
   } catch (e) { console.warn('Không đọc được dữ liệu cũ', e); }
   db = seedDB();
-  saveNow();
+  saveNow(true); // dữ liệu mẫu: không tính là "đã sửa" để máy mới đăng nhập sẽ lấy bản trên mây
 }
 function migrate(d) {
   const base = emptyDB();
@@ -73,8 +73,13 @@ function migrate(d) {
 }
 let saveTimer;
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 120); }
-function saveNow() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+function saveNow(silent = false) {
+  clearTimeout(saveTimer);
+  if (!silent) db.updatedAt = Date.now();
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(db));
+    if (!silent && typeof Cloud !== 'undefined') Cloud.touched();
+  }
   catch (e) { typeof toast === 'function' && toast('Không lưu được dữ liệu (bộ nhớ trình duyệt đầy?)', { type: 'error' }); }
 }
 

@@ -6,7 +6,14 @@ Web cá nhân chạy hoàn toàn trên máy: quản lý việc, lịch, nhắc v
 - Cách nhanh: nhấp đúp `index.html` (mở bằng Chrome/Edge).
 - Hoặc chạy server nhỏ: `python -m http.server 5173` trong thư mục này rồi vào http://localhost:5173
 
-Dữ liệu lưu trong trình duyệt (localStorage). Vào **Cài đặt → Xuất sao lưu** để giữ một bản `.json`, và **Nhập sao lưu** để chuyển sang máy khác.
+Dữ liệu lưu trong trình duyệt (localStorage) và — nếu đăng nhập — tự đồng bộ lên Supabase.
+
+## Đồng bộ đám mây (Supabase)
+- Vào **Cài đặt → Đồng bộ đám mây**, tạo tài khoản bằng email + mật khẩu (bấm link xác nhận trong email), rồi đăng nhập trên mọi thiết bị.
+- Sửa gì cũng tự đẩy lên sau ~1,5 giây; mở lại tab hoặc mỗi 45 giây sẽ tự kéo bản mới về. Mất mạng vẫn dùng bình thường.
+- Hai máy cùng sửa: dữ liệu được gộp theo từng mục (việc, ghi chú, chi tiêu…), mục sửa cùng lúc thì lấy bản sửa sau cùng.
+- Kết nối nằm ở `js/config.js` (khóa công khai). Bảng và quyền truy cập tạo bằng `supabase.sql` — mỗi tài khoản chỉ đọc/ghi được dữ liệu của mình.
+- Vẫn nên thỉnh thoảng **Cài đặt → Xuất sao lưu** một bản `.json`.
 
 ## Có gì bên trong
 | Mục | Chức năng |

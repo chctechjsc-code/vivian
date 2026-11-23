@@ -672,3 +672,19 @@ tr:hover .hdel { opacity: 1; }
   .stat .num { font-size: 1.25rem; }
   .cal-wd div { font-size: .62rem; }
 }
+
+/* ============ Đồng bộ đám mây ============ */
+.sync-badge {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 12px;
+  font-size: .76rem; font-weight: 600; color: var(--ink-3); text-decoration: none;
+}
+.sync-badge[hidden] { display: none; }
+.sync-badge:hover { background: rgba(var(--glass-rgb), .55); color: var(--ink-2); }
+.sync-badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.sync-badge[data-state="ok"] i { background: #33a98c; box-shadow: 0 0 0 3px rgba(51, 169, 140, .18); }
+.sync-badge[data-state="syncing"] i { background: #5b8def; animation: syncPulse 1s ease-in-out infinite; }
+.sync-badge[data-state="error"] i { background: #e5678f; }
+.sync-badge[data-state="offline"] i, .sync-badge[data-state="out"] i { background: #e99a33; }
+@keyframes syncPulse { 50% { opacity: .3; } }
+.sync-line[data-state="error"] { color: #d0507a; }
+@media (max-width: 860px) { .sync-badge { display: none; } }
