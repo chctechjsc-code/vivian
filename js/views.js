@@ -83,8 +83,7 @@ Views.dashboard = () => {
   }).join('');
 
   const habits = db.habits.map(h => `<button type="button" class="habit-chip ${h.log[t] ? 'on' : ''}" style="--c:${colorOf(h.color)}" data-act="habitToggle" data-id="${h.id}" data-date="${t}">${esc(h.emo)} ${esc(h.name)}</button>`).join('');
-  const rems = db.reminders.filter(r => !r.done).map(r => ({ r, n: nextOcc(r) })).filter(x => x.n && x.n >= t)
-    .sort((a, b) => (a.n + (a.r.time || '')).localeCompare(b.n + (b.r.time || ''))).slice(0, 4);
+  const rems = bellsBetween(Date.now(), atMs(addDays(t, 8), '00:00')).slice(0, 5);
 
   return `
   ${pageHead(`${greeting()}, ${esc(s.nick)} <span style="font-weight:400">☁</span>`, `${fmtLong(t)} · ${quoteOfDay()}`)}
@@ -127,18 +126,18 @@ Views.dashboard = () => {
       </section>
       <section class="glass card">
         <div class="card-head"><h3>${icon('bell', 18)} Sắp nhắc</h3><a class="link-btn" href="#/reminders">Tất cả</a></div>
-        <div class="mini-list">${rems.length ? rems.map(({ r, n }) => `<div class="mini-item" data-act="editRem" data-id="${r.id}">${icon('bell', 14)}<span class="t">${esc(r.title)}</span><span class="when">${relDay(n)} ${r.time || ''}</span></div>`).join('') : '<span class="muted small">Không có nhắc nào sắp tới.</span>'}</div>
+        <div class="mini-list">${rems.length ? rems.map(b => { const ring = new Date(b.at), act = { rem: 'editRem', task: 'editTask', event: 'editEvent' }[b.kind]; return `<div class="mini-item" data-act="${act}" data-id="${b.item.id}">${icon(b.kind === 'event' ? 'calendar' : b.kind === 'task' ? 'tasks' : 'bell', 14)}<span class="t">${esc(b.item.title)}</span><span class="when">${relDay(ymd(ring))} ${pad(ring.getHours())}:${pad(ring.getMinutes())}</span></div>`; }).join('') : '<span class="muted small">Không có chuông nào sắp reo.</span>'}</div>
       </section>
     </div>
 
     <section class="glass card d-week">
-      <div class="card-head"><h3>${icon('calendar', 18)} Sự kiện 7 ngày tới</h3><a class="link-btn" href="#/tasks">Mở lịch tháng →</a></div>
+      <div class="card-head"><h3>${icon('calendar', 18)} Sự kiện 7 ngày tới</h3><a class="link-btn" href="#/calendar">Mở lịch tháng →</a></div>
       <div class="week">${week}</div>
     </section>
   </div>`;
 };
 
-/* =================== CÔNG VIỆC: bảng việc + lịch sự kiện =================== */
+/* =================== CÔNG VIỆC: bảng việc =================== */
 function calPill(it, d) {
   if (it.kind === 'event') {
     const e = it.ev, c = colorOf(catOf(e.cat).color), tm = eventTime(e, d);
@@ -157,14 +156,15 @@ function taskCard(t) {
   if (isRepeat(t)) sub.push(`${REPEAT_SHORT[t.repeat]}${t.time ? ' ' + t.time : ''}`);
   else if (t.date) sub.push(relDay(t.date) + (t.time ? ' ' + t.time : ''));
   if (t.deadline) sub.push(`<span class="${late ? 'late' : ''}">Hạn ${fmtDM(t.deadline)}</span>`);
+  if (hasRemind(t)) sub.push(`🔔 ${remindShort(t.remind)}`);
   else if (late) sub.push('<span class="late">trễ</span>');
   return `<div class="tcard ${done && !isRepeat(t) ? 'done' : ''}" draggable="true" data-drag-task="${t.id}" data-act="editTask" data-id="${t.id}" style="--c:${col}">
     ${canTick ? `<button type="button" class="chk sm ${done ? 'on' : ''}" style="--c:${col}" data-act="toggleTask" data-id="${t.id}" data-date="${td}" aria-label="Xong">${icon('check', 11, 3)}</button>` : `<span style="color:${col};margin-top:1px">${icon('repeat', 16)}</span>`}
     <div class="tcard-body"><div class="tcard-title">${t.priority ? '<span class="star">★</span> ' : ''}${esc(t.title)}</div><div class="tcard-sub">${sub.join(' · ')}</div></div>
   </div>`;
 }
-function groupBlock(key, title, color, tasks, extraHead = '', dropStatus = '') {
-  const LIMIT = 6, open = ui.expanded[key];
+function groupBlock(key, title, color, tasks, extraHead = '', dropStatus = '', LIMIT = 6) {
+  const open = ui.expanded[key];
   const shown = open ? tasks : tasks.slice(0, LIMIT);
   return `<div class="group" ${dropStatus ? `data-drop-status="${dropStatus}"` : ''}>
     <div class="group-h"><span class="dot" style="--c:${color};width:10px;height:10px"></span>${title}<span class="count">· ${tasks.length}</span><span class="sp"></span>${extraHead}</div>
@@ -172,28 +172,46 @@ function groupBlock(key, title, color, tasks, extraHead = '', dropStatus = '') {
     ${tasks.length > LIMIT ? `<button type="button" class="more-btn" data-act="expand" data-key="${key}">${open ? 'Thu gọn ↑' : `Xem thêm ${tasks.length - LIMIT} ↓`}</button>` : ''}
   </div>`;
 }
+function catChips(cur, act) {
+  return [`<button type="button" class="fchip ${cur === 'all' ? 'on' : ''}" data-act="${act}" data-cat="all">Tất cả</button>`]
+    .concat(db.categories.map(c => `<button type="button" class="fchip ${cur === c.id ? 'on' : ''}" data-act="${act}" data-cat="${c.id}"><span class="dot" style="--c:${colorOf(c.color)}"></span>${esc(c.name)}</button>`)).join('');
+}
 Views.tasks = () => {
-  const y = ui.calY, m = ui.calM, ym = `${y}-${pad(m + 1)}`, td = today();
-  const f = ui.calFilter;
+  const f = ui.taskFilter;
   const pool = activeTasks().filter(t => f === 'all' || t.cat === f);
-  let panel;
+  let body;
   if (ui.panelTab === 'board') {
     const one = pool.filter(t => !isRepeat(t));
     const sortT = arr => arr.sort((a, b) => (b.priority - a.priority) || (dueKey(a) || '9999').localeCompare(dueKey(b) || '9999'));
     const todo = sortT(one.filter(t => t.status === 'todo'));
     const doing = sortT(one.filter(t => t.status === 'doing'));
     const done = one.filter(t => t.status === 'done').sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
-    panel = groupBlock('todo', 'Cần làm', STATUSES[0].color, todo, '', 'todo')
-      + groupBlock('doing', 'Đang làm', STATUSES[1].color, doing, '', 'doing')
-      + groupBlock('done', 'Đã xong', STATUSES[2].color, done, done.length ? `<button type="button" class="link-btn" data-act="archiveDone">Cất vào lưu trữ</button>` : '', 'done');
+    const col = (html, add) => `<section class="glass panel"><div class="panel-scroll">${html}</div>${add ? `<button type="button" class="add-row" data-act="newTask">${icon('plus', 15)} Thêm việc</button>` : ''}</section>`;
+    body = `<div class="board">
+      ${col(groupBlock('todo', 'Cần làm', STATUSES[0].color, todo, '', 'todo', 40), true)}
+      ${col(groupBlock('doing', 'Đang làm', STATUSES[1].color, doing, '', 'doing', 40))}
+      ${col(groupBlock('done', 'Đã xong', STATUSES[2].color, done, done.length ? `<button type="button" class="link-btn" data-act="archiveDone">Cất vào lưu trữ</button>` : '', 'done', 12))}
+    </div>`;
   } else {
     const rep = pool.filter(isRepeat);
     const by = r => rep.filter(t => t.repeat === r);
-    panel = ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'].filter(r => by(r).length)
-      .map(r => groupBlock('rep-' + r, REPEAT_LABEL[r], COLORS.sky, by(r))).join('')
-      || emptyState('Chưa có việc lặp lại.<br>Tạo việc và chọn “Lặp lại”.');
+    const groups = ['daily', 'weekdays', 'weekly', 'monthly', 'yearly'].filter(r => by(r).length)
+      .map(r => `<section class="glass panel">${groupBlock('rep-' + r, REPEAT_LABEL[r], COLORS.sky, by(r), '', '', 40)}</section>`).join('');
+    body = groups ? `<div class="routine-grid">${groups}</div>` : `<section class="glass card">${emptyState('Chưa có việc lặp lại.<br>Tạo việc và chọn “Lặp lại”.')}</section>`;
   }
+  return `
+  ${pageHead('Công việc', 'Những việc Vân cần làm và tick xong. Việc có hạn sẽ báo khi quá hạn.', `<button type="button" class="btn primary" data-act="newTask">${icon('plus', 16)} Việc mới</button>`)}
+  <div class="task-bar">
+    <div class="seg"><button type="button" class="${ui.panelTab === 'board' ? 'on' : ''}" data-act="panelTab" data-tab="board">Bảng việc</button><button type="button" class="${ui.panelTab === 'routine' ? 'on' : ''}" data-act="panelTab" data-tab="routine">${icon('repeat', 13)} Lặp lại</button></div>
+    <div class="cal-filters">${catChips(f, 'taskFilter')}</div>
+  </div>
+  ${body}`;
+};
 
+/* =================== LỊCH: sự kiện theo tháng =================== */
+Views.calendar = () => {
+  const y = ui.calY, m = ui.calM, ym = `${y}-${pad(m + 1)}`, td = today();
+  const f = ui.calFilter;
   const start = calendarStart(y, m);
   const rows = Math.ceil((diffDays(start, `${ym}-01`) + daysInMonth(y, m)) / 7);
   let cells = '';
@@ -206,41 +224,29 @@ Views.tasks = () => {
       <div class="cell-items" data-date="${d}">${items.map(it => calPill(it, d)).join('')}</div>
     </div>`;
   }
-
-  const chips = [`<button type="button" class="fchip ${f === 'all' ? 'on' : ''}" data-act="calFilter" data-cat="all">Tất cả</button>`]
-    .concat(db.categories.map(c => `<button type="button" class="fchip ${f === c.id ? 'on' : ''}" data-act="calFilter" data-cat="${c.id}"><span class="dot" style="--c:${colorOf(c.color)}"></span>${esc(c.name)}</button>`)).join('');
-
   return `
-  ${pageHead('Công việc', '', `<label class="check small">${''}<input type="checkbox" data-change="calRem" ${db.settings.calRem ? 'checked' : ''}> Hiện nhắc việc trên lịch</label><button type="button" class="btn primary" data-act="newTask">${icon('plus', 16)} Việc mới</button>`)}
-  <div class="tasks-wrap">
-    <aside class="glass panel">
-      <div class="seg"><button type="button" class="${ui.panelTab === 'board' ? 'on' : ''}" data-act="panelTab" data-tab="board">Bảng việc</button><button type="button" class="${ui.panelTab === 'routine' ? 'on' : ''}" data-act="panelTab" data-tab="routine">${icon('repeat', 13)} Lặp lại</button></div>
-      <button type="button" class="add-row" data-act="newTask">${icon('plus', 15)} Thêm việc</button>
-      <div class="panel-scroll">${panel}</div>
-    </aside>
-    <section class="glass cal">
-      <div class="cal-head">
-        <h2>${fmtMonth(ym)}</h2>
-        <div class="cal-filters">${chips}</div>
-        <div class="month-nav">
-          <button type="button" class="icon-btn" data-act="calNav" data-d="-1" aria-label="Tháng trước">${icon('left')}</button>
-          <span class="lbl-m">Tháng ${m + 1}</span>
-          <button type="button" class="icon-btn" data-act="calNav" data-d="1" aria-label="Tháng sau">${icon('right')}</button>
-          <button type="button" class="btn ghost sm" data-act="calToday">Hôm nay</button>
-          <button type="button" class="btn primary sm" data-act="newEvent">${icon('plus', 14)} Sự kiện</button>
-        </div>
+  ${pageHead('Lịch', 'Những gì sẽ diễn ra: họp, hẹn, sinh nhật, chuyến đi…', `<label class="check small"><input type="checkbox" data-change="calRem" ${db.settings.calRem ? 'checked' : ''}> Hiện nhắc nhanh trên lịch</label><button type="button" class="btn primary" data-act="newEvent">${icon('plus', 16)} Sự kiện mới</button>`)}
+  <section class="glass cal">
+    <div class="cal-head">
+      <h2>${fmtMonth(ym)}</h2>
+      <div class="cal-filters">${catChips(f, 'calFilter')}</div>
+      <div class="month-nav">
+        <button type="button" class="icon-btn" data-act="calNav" data-d="-1" aria-label="Tháng trước">${icon('left')}</button>
+        <span class="lbl-m">Tháng ${m + 1}</span>
+        <button type="button" class="icon-btn" data-act="calNav" data-d="1" aria-label="Tháng sau">${icon('right')}</button>
+        <button type="button" class="btn ghost sm" data-act="calToday">Hôm nay</button>
       </div>
-      <div class="cal-wd">${WD_LONG.map((w, i) => `<div><span class="wl">${w}</span><span class="ws">${WD_SHORT[i]}</span></div>`).join('')}</div>
-      <div class="cal-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${cells}</div>
-    </section>
-  </div>`;
+    </div>
+    <div class="cal-wd">${WD_LONG.map((w, i) => `<div><span class="wl">${w}</span><span class="ws">${WD_SHORT[i]}</span></div>`).join('')}</div>
+    <div class="cal-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${cells}</div>
+  </section>`;
 };
 
 /* =================== NHẮC VIỆC =================== */
-function remRow(r) {
-  const n = nextOcc(r), late = remIsLate(r);
+function remRow(r, on) {
+  const n = on || nextOcc(r), late = remIsLate(r);
   const when = r.done ? 'Đã xong' : n ? `${relDay(n)}${r.time ? ' · ' + r.time : ''}` : '—';
-  return `<div class="rem-row ${r.done ? 'done' : ''} ${late ? 'alert' : ''}">
+  return `<div class="rem-row ${r.done ? 'done' : ''} ${late ? 'alert' : ''} ${!late && on && atMs(on, r.time) <= Date.now() ? 'past' : ''}">
     <span class="rem-ic">${icon('bell', 18)}</span>
     <div class="rem-main" data-act="editRem" data-id="${r.id}">
       <div class="rem-t">${esc(r.title)}</div>
@@ -250,35 +256,59 @@ function remRow(r) {
     <button type="button" class="icon-btn plain" data-act="delRem" data-id="${r.id}" aria-label="Xóa">${icon('trash', 16)}</button>
   </div>`;
 }
+/** Một dòng chuông của việc / sự kiện (chuông gắn kèm, không phải nhắc nhanh) */
+function bellRow(a) {
+  const it = a.item, past = a.at <= Date.now();
+  const ring = new Date(a.at), ringHM = pad(ring.getHours()) + ':' + pad(ring.getMinutes());
+  const ringDay = ymd(ring) === a.date ? '' : relDay(ymd(ring)) + ' ';
+  const isEv = a.kind === 'event', c = colorOf(catOf(it.cat).color);
+  return `<div class="rem-row bell ${past ? 'past' : ''}" style="--c:${c}">
+    <span class="rem-ic" style="color:${c}">${icon(isEv ? 'calendar' : 'tasks', 18)}</span>
+    <div class="rem-main" data-act="${isEv ? 'editEvent' : 'editTask'}" data-id="${it.id}">
+      <div class="rem-t">${esc(it.title)}</div>
+      <div class="rem-m"><span>${icon('bell', 12)}</span>${past ? 'Đã reo' : 'Reo'} ${ringDay}${ringHM}<span class="tag">${isEv ? 'Sự kiện' : 'Việc'} ${a.hm || (isEv ? 'cả ngày' : '')} · ${remindShort(it.remind)}</span>${it.location ? ` · ${esc(it.location)}` : ''}</div>
+    </div>
+  </div>`;
+}
 Views.reminders = () => {
-  const t = today();
-  const act = db.reminders.filter(r => !r.done);
-  const withN = act.map(r => ({ r, n: nextOcc(r) }));
-  const late = withN.filter(x => remIsLate(x.r));
-  const todayL = withN.filter(x => !remIsLate(x.r) && x.n === t);
-  const later = withN.filter(x => !remIsLate(x.r) && x.n && x.n > t).sort((a, b) => (a.n + a.r.time).localeCompare(b.n + b.r.time));
+  const t = today(), now = Date.now();
+  const startToday = atMs(t, '00:00'), endToday = atMs(addDays(t, 1), '00:00');
+  const late = db.reminders.filter(r => remIsLate(r));
+  const bells = bellsBetween(startToday, atMs(addDays(t, 8), '00:00'))
+    .filter(b => !(b.kind === 'rem' && remIsLate(b.item)));       // nhắc trễ đã nằm ở mục "Đến giờ rồi"
+  const row = b => b.kind === 'rem' ? remRow(b.item, b.date) : bellRow(b);
+  const todayB = bells.filter(b => b.at < endToday);
+  const laterB = bells.filter(b => b.at >= endToday);
   const done = db.reminders.filter(r => r.done);
-  const sortT = arr => arr.sort((a, b) => (a.r.time || '').localeCompare(b.r.time || ''));
   const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
-  const sec = (title, arr) => arr.length ? `<div class="section-t">${title} · ${arr.length}</div>${arr.map(x => remRow(x.r || x)).join('')}` : '';
+  const sec = (title, arr, fn) => arr.length ? `<div class="section-t">${title} · ${arr.length}</div>${arr.map(fn).join('')}` : '';
   return `
-  ${pageHead('Nhắc việc', 'Để Vivian nhớ giùm Vân — chuông sẽ reo khi trang đang mở.', `<button type="button" class="btn primary" data-act="newRem">${icon('plus', 16)} Nhắc mới</button>`)}
+  ${pageHead('Nhắc việc', 'Mọi chuông sắp reo ở một chỗ: chuông của việc, của sự kiện và nhắc nhanh. Chuông reo khi trang đang mở.', `<button type="button" class="btn primary" data-act="newRem">${icon('plus', 16)} Nhắc nhanh</button>`)}
   ${perm === 'default' ? `<div class="banner">${icon('bell', 18)}<span>Bật thông báo để nhận nhắc kể cả khi đang ở tab khác.</span><span class="sp"></span><button type="button" class="btn accent sm" data-act="askNotify">Bật thông báo</button></div>` : ''}
   <div class="two-col">
-    <form class="glass card stack" data-submit="quickRem">
-      <h3>${icon('plus', 18)} Nhắc nhanh</h3>
-      <input class="field" name="title" placeholder="Nhắc Vân điều gì nè?" required autocomplete="off">
-      <div class="grid2">
-        <label class="lbl">Ngày<input class="field" type="date" name="date" value="${t}" required></label>
-        <label class="lbl">Giờ<input class="field" type="time" name="time" value="${pad((new Date().getHours() + 1) % 24)}:00" required></label>
-      </div>
-      <label class="lbl">Lặp lại<select class="field" name="repeat">${Object.entries(REPEAT_LABEL).map(([k, v]) => opt(k, v, 'none')).join('')}</select></label>
-      <button class="btn primary" type="submit">${icon('bell', 16)} Đặt nhắc</button>
-    </form>
+    <div class="stack">
+      <form class="glass card stack" data-submit="quickRem">
+        <h3>${icon('plus', 18)} Nhắc nhanh</h3>
+        <p class="muted small">Cho những thứ không phải việc hay sự kiện: uống thuốc, vươn vai, đi ngủ sớm…</p>
+        <input class="field" name="title" placeholder="Nhắc Vân điều gì nè?" required autocomplete="off">
+        <div class="grid2">
+          <label class="lbl">Ngày<input class="field" type="date" name="date" value="${t}" required></label>
+          <label class="lbl">Giờ<input class="field" type="time" name="time" value="${pad((new Date().getHours() + 1) % 24)}:00" required></label>
+        </div>
+        <label class="lbl">Lặp lại<select class="field" name="repeat">${Object.entries(REPEAT_LABEL).map(([k, v]) => opt(k, v, 'none')).join('')}</select></label>
+        <button class="btn primary" type="submit">${icon('bell', 16)} Đặt nhắc</button>
+      </form>
+      <section class="glass card stack">
+        <h3>${icon('bell', 18)} Chuông cho việc & sự kiện</h3>
+        <p class="muted small">Khi tạo hoặc sửa một việc / sự kiện, chọn <b>Nhắc tôi</b> (đúng giờ, trước 15 phút, trước 1 ngày…). Chuông sẽ hiện ở danh sách bên cạnh.</p>
+        <div class="row" style="flex-wrap:wrap"><button type="button" class="btn ghost sm" data-act="newTask">${icon('tasks', 14)} Việc mới</button><button type="button" class="btn ghost sm" data-act="newEvent">${icon('calendar', 14)} Sự kiện mới</button></div>
+      </section>
+    </div>
     <section class="glass card">
-      ${sec('Đến giờ rồi', sortT(late))}${sec('Hôm nay', sortT(todayL))}${sec('Sắp tới', later)}
-      ${!late.length && !todayL.length && !later.length ? emptyState('Chưa có nhắc việc nào.') : ''}
-      ${done.length ? `<div class="section-t">Đã xong · ${done.length} <button type="button" class="link-btn" data-act="clearDoneRem" style="margin-left:8px">Xóa hết</button></div>${done.slice(0, 20).map(remRow).join('')}` : ''}
+      <div class="card-head"><h3>${icon('clock', 18)} Sắp đổ chuông</h3><span class="count">7 ngày tới</span></div>
+      ${sec('Đến giờ rồi', late, r => remRow(r))}${sec('Hôm nay', todayB, row)}${sec('Sắp tới', laterB, row)}
+      ${!late.length && !bells.length ? emptyState('Chưa có chuông nào trong 7 ngày tới.') : ''}
+      ${done.length ? `<div class="section-t">Nhắc nhanh đã xong · ${done.length} <button type="button" class="link-btn" data-act="clearDoneRem" style="margin-left:8px">Xóa hết</button></div>${done.slice(0, 20).map(r => remRow(r)).join('')}` : ''}
     </section>
   </div>`;
 };

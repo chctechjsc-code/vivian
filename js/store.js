@@ -52,7 +52,7 @@ function defaultCats() {
 function emptyDB() {
   return {
     version: 1, settings: defaultSettings(), categories: defaultCats(),
-    tasks: [], events: [], reminders: [], transactions: [], notes: [], projects: [], habits: [], focusLog: {}, quick: '',
+    tasks: [], events: [], reminders: [], transactions: [], notes: [], projects: [], habits: [], focusLog: {}, alerted: {}, quick: '',
   };
 }
 
@@ -68,7 +68,9 @@ function loadDB() {
 function migrate(d) {
   const base = emptyDB();
   const out = { ...base, ...d, settings: { ...base.settings, ...(d.settings || {}) } };
-  out.tasks.forEach(t => { t.doneDates = t.doneDates || []; t.repeat = t.repeat || 'none'; });
+  out.tasks.forEach(t => { t.doneDates = t.doneDates || []; t.repeat = t.repeat || 'none'; if (t.remind == null) t.remind = ''; });
+  out.events.forEach(e => { if (e.remind == null) e.remind = ''; });
+  out.alerted = out.alerted || {};
   return out;
 }
 let saveTimer;
@@ -134,7 +136,52 @@ function doneTodayCount() {
   return db.tasks.filter(x => isRepeat(x) ? (x.doneDates || []).includes(t) : (x.status === 'done' && x.doneAt && ymd(new Date(x.doneAt)) === t)).length;
 }
 
-/* Nhắc việc */
+/* ============ Chuông "Nhắc tôi" gắn vào việc / sự kiện ============
+   remind = '' (không nhắc) hoặc số phút báo trước (0 = đúng giờ).
+   Việc/sự kiện không có giờ (hoặc cả ngày) thì coi như 08:00 sáng hôm đó. */
+const REMIND_OPTS = [['', 'Không nhắc'], ['0', 'Đúng giờ'], ['5', 'Trước 5 phút'], ['15', 'Trước 15 phút'], ['30', 'Trước 30 phút'], ['60', 'Trước 1 giờ'], ['1440', 'Trước 1 ngày']];
+const DEFAULT_HM = '08:00';
+const hasRemind = x => x.remind !== '' && x.remind != null;
+function remindShort(m) {
+  m = Number(m);
+  if (!m) return 'đúng giờ';
+  if (m >= 1440) return `trước ${m / 1440} ngày`;
+  if (m >= 60) return `trước ${m / 60} giờ`;
+  return `trước ${m} phút`;
+}
+const atMs = (d, hm) => { const [h, m] = (hm || DEFAULT_HM).split(':').map(Number); const x = parseYmd(d); x.setHours(h, m, 0, 0); return x.getTime(); };
+/** Các lần chuông của việc / sự kiện reo trong khoảng [fromMs, toMs) */
+function itemAlerts(fromMs, toMs) {
+  const out = [];
+  const push = (kind, item, d, hm) => {
+    const at = atMs(d, hm) - Number(item.remind) * 60000;
+    if (at >= fromMs && at < toMs) out.push({ key: `${item.id}@${d}`, kind, item, date: d, hm: hm || '', at });
+  };
+  // chuông "trước 1 ngày" reo hôm nay cho việc của ngày mai → quét dư 1–2 ngày
+  for (let d = ymd(new Date(fromMs)), last = addDays(ymd(new Date(toMs)), 2); d <= last; d = addDays(d, 1)) {
+    activeTasks().forEach(t => { if (hasRemind(t) && occursOn(t, d) && !isDone(t, d)) push('task', t, d, t.time); });
+    db.events.forEach(e => {
+      if (e.archived || !hasRemind(e)) return;
+      if (isRepeat(e) ? !occursOn(e, d) : e.date !== d) return;
+      push('event', e, d, e.allDay ? '' : e.start);
+    });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+/** Mọi chuông (nhắc nhanh + việc + sự kiện) trong khoảng, để hiện danh sách */
+function bellsBetween(fromMs, toMs) {
+  const list = itemAlerts(fromMs, toMs);
+  for (let d = ymd(new Date(fromMs)), last = ymd(new Date(toMs)); d <= last; d = addDays(d, 1)) {
+    db.reminders.forEach(r => {
+      if (r.done || !occursOn(r, d)) return;
+      const at = atMs(d, r.time || '00:00');
+      if (at >= fromMs && at < toMs) list.push({ key: `${r.id}@${d}`, kind: 'rem', item: r, date: d, hm: r.time || '', at });
+    });
+  }
+  return list.sort((a, b) => a.at - b.at);
+}
+
+/* Nhắc nhanh */
 function nextOcc(r) {
   if (!isRepeat(r)) return r.date;
   const t = today(), hm = nowHM();
@@ -167,7 +214,7 @@ function seedDB() {
   const t = today();
   const D = n => addDays(t, n);
   const T = (title, cat, date, extra = {}) => ({
-    id: uid(), title, note: '', cat, status: 'todo', date, time: '', deadline: '', repeat: 'none',
+    id: uid(), title, note: '', cat, status: 'todo', date, time: '', deadline: '', repeat: 'none', remind: '',
     doneDates: [], projectId: '', priority: false, archived: false, createdAt: Date.now(), doneAt: null, ...extra,
   });
   const p1 = { id: uid(), name: 'Đà Lạt cuối năm', desc: 'Chuyến đi săn mây của hai đứa ☁', color: 'rose', deadline: D(24), archived: false, createdAt: Date.now(),
@@ -186,7 +233,7 @@ function seedDB() {
   d.projects = [p1, p2, p3];
 
   d.tasks = [
-    T('Gửi báo cáo tuần', 'work', D(0), { time: '10:00', priority: true }),
+    T('Gửi báo cáo tuần', 'work', D(0), { time: '10:00', priority: true, remind: 30 }),
     T('Họp nhóm dự án', 'work', D(0), { time: '14:30', status: 'doing' }),
     T('Uống đủ 2 lít nước', 'health', D(-20), { repeat: 'daily' }),
     T('Học 10 từ tiếng Hàn', 'study', D(-14), { repeat: 'daily', projectId: p2.id }),
@@ -196,7 +243,7 @@ function seedDB() {
     T('Trả sách thư viện', 'self', D(-3)),
     T('Mua vé xe đi Đà Lạt', 'love', D(1), { deadline: D(3), projectId: p1.id, priority: true }),
     T('Lên lịch trình săn mây', 'love', D(4), { projectId: p1.id }),
-    T('Gọi điện cho mẹ', 'self', D(1), { time: '19:30' }),
+    T('Gọi điện cho mẹ', 'self', D(1), { time: '19:30', remind: 0 }),
     T('Dọn tủ quần áo', 'home', D(2)),
     T('Đặt lịch khám răng', 'health', D(3), { time: '09:00' }),
     T('Nộp bài tập tiếng Hàn', 'study', D(5), { deadline: D(6), projectId: p2.id }),
@@ -216,14 +263,14 @@ function seedDB() {
   d.tasks[3].doneDates = [D(-1), D(-2), D(-4)];
 
   const E = (title, cat, date, extra = {}) => ({
-    id: uid(), title, note: '', location: '', cat, date, endDate: '', allDay: false, start: '', end: '',
+    id: uid(), title, note: '', location: '', cat, date, endDate: '', allDay: false, start: '', end: '', remind: '',
     repeat: 'none', archived: false, createdAt: Date.now(), ...extra,
   });
   d.events = [
-    E('Họp nhóm dự án', 'work', D(0), { start: '14:30', end: '15:30', location: 'Phòng họp tầng 3' }),
+    E('Họp nhóm dự án', 'work', D(0), { start: '14:30', end: '15:30', location: 'Phòng họp tầng 3', remind: 15 }),
     E('Cà phê với Linh', 'self', D(2), { start: '17:00', end: '18:30', location: 'The Coffee House' }),
-    E('Khám răng', 'health', D(3), { start: '09:00', end: '10:00', location: 'Nha khoa Kim' }),
-    E('Sinh nhật bạn Linh 🎂', 'self', D(8), { allDay: true }),
+    E('Khám răng', 'health', D(3), { start: '09:00', end: '10:00', location: 'Nha khoa Kim', remind: 60 }),
+    E('Sinh nhật bạn Linh 🎂', 'self', D(8), { allDay: true, remind: 1440 }),
     E('Lớp tiếng Hàn', 'study', D(-12), { start: '19:00', end: '20:30', repeat: 'weekly' }),
     E('Đà Lạt săn mây ☁', 'love', D(20), { endDate: D(23), allDay: true, location: 'Đà Lạt' }),
     E('Hội thảo thiết kế', 'work', D(12), { start: '08:30', end: '11:30', location: 'GEM Center' }),

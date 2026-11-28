@@ -20,9 +20,9 @@ Dữ liệu lưu trong trình duyệt (localStorage) và — nếu đăng nhập
 | Mục | Chức năng |
 |---|---|
 | Tổng quan | Lời chào theo giờ, vòng tiến độ hôm nay, "mây gom được", việc quá hạn (dời sang hôm nay 1 chạm), 7 ngày tới, thói quen, nhắc sắp tới |
-| Công việc | Bảng việc (Cần làm / Đang làm / Đã xong) bên trái, kéo thả sang cột; việc lặp mỗi ngày / T2–T6 / tuần / tháng / năm |
-| Lịch sự kiện | Lịch tháng bên phải trang Công việc chỉ hiện **sự kiện** (và nhắc việc nếu bật): có giờ hoặc cả ngày, kéo dài nhiều ngày, địa điểm, lặp lại; kéo thả sự kiện sang ngày khác; bấm “+” trong ô để thêm |
-| Nhắc việc | Chuông + thông báo trình duyệt khi đến giờ (khi trang đang mở) |
+| Công việc | Những việc cần làm và tick xong: bảng Cần làm / Đang làm / Đã xong (kéo thả giữa các cột), hạn chót, quá hạn, việc lặp; ô **Nhắc tôi** để gắn chuông |
+| Lịch | Trang riêng, chỉ hiện **sự kiện** (họp, hẹn, sinh nhật, chuyến đi): có giờ hoặc cả ngày, nhiều ngày, địa điểm, lặp lại, **Nhắc tôi**; kéo thả sang ngày khác |
+| Nhắc việc | Danh sách **Sắp đổ chuông** 7 ngày tới, gom chuông của việc, sự kiện và **nhắc nhanh** (uống thuốc, đi ngủ sớm…). Chuông + thông báo trình duyệt khi trang đang mở |
 | Chi tiêu | Thu/chi theo tháng, ngân sách, dự báo cuối tháng, biểu đồ theo danh mục |
 | Ghi chú | Ghi chú màu pastel, ghim, tìm kiếm; ô "Ghi nhanh" ở thanh bên (Ctrl + Enter) |
 | Dự án | Các bước (milestone), % tiến độ, việc liên kết |

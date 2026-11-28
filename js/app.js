@@ -3,12 +3,13 @@
 const now0 = new Date();
 const ui = {
   view: 'dashboard', calY: now0.getFullYear(), calM: now0.getMonth(), calFilter: 'all',
-  panelTab: 'board', expanded: {}, finYM: ymOf(today()), noteQ: '', archTab: 'tasks',
+  panelTab: 'board', taskFilter: 'all', expanded: {}, finYM: ymOf(today()), noteQ: '', archTab: 'tasks',
   lastDay: today(),
 };
 const NAV = [
   { id: 'dashboard', label: 'Tổng quan', icon: 'home' },
   { id: 'tasks', label: 'Công việc', icon: 'tasks' },
+  { id: 'calendar', label: 'Lịch', icon: 'calendar' },
   { id: 'reminders', label: 'Nhắc việc', icon: 'bell' },
   { id: 'finance', label: 'Chi tiêu', icon: 'wallet' },
   { id: 'notes', label: 'Ghi chú', icon: 'note' },
@@ -38,7 +39,7 @@ function render() {
   main.innerHTML = Views[ui.view]();
   main.scrollTop = keep;
   if (ui.view === 'relax') syncRelaxUI();
-  if (ui.view === 'tasks') fitCells();
+  if (ui.view === 'calendar') fitCells();
 }
 /** Ẩn bớt mục không vừa ô lịch, thay bằng nút "+n mục khác" */
 function fitCells() {
@@ -58,7 +59,7 @@ function fitCells() {
   });
 }
 let fitTimer;
-window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => ui.view === 'tasks' && fitCells(), 120); });
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => ui.view === 'calendar' && fitCells(), 120); });
 function rerender() { render(); refreshModal(); }
 function route() {
   const v = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -111,7 +112,7 @@ function buildStars() {
 /* ============ Modal: việc ============ */
 function taskModal(task, preset = {}) {
   const isNew = !task;
-  const t = task || { title: '', note: '', cat: preset.cat || (ui.calFilter !== 'all' ? ui.calFilter : db.categories[0]?.id), status: 'todo', date: preset.date ?? '', time: '', deadline: '', repeat: 'none', projectId: preset.projectId || '', priority: false };
+  const t = task || { title: '', note: '', cat: preset.cat || (ui.taskFilter !== 'all' ? ui.taskFilter : db.categories[0]?.id), status: 'todo', date: preset.date ?? '', time: '', deadline: '', repeat: 'none', remind: '', projectId: preset.projectId || '', priority: false };
   openModal({
     title: isNew ? 'Việc mới ☁' : 'Sửa việc',
     body: `
@@ -124,6 +125,7 @@ function taskModal(task, preset = {}) {
         <label class="lbl">Giờ<input class="field" type="time" name="time" value="${t.time}"></label>
         <label class="lbl">Hạn chót<input class="field" type="date" name="deadline" value="${t.deadline}"></label>
         <label class="lbl">Lặp lại<select class="field" name="repeat">${Object.entries(REPEAT_LABEL).map(([k, v]) => opt(k, v, t.repeat)).join('')}</select></label>
+        <label class="lbl">Nhắc tôi<select class="field" name="remind">${REMIND_OPTS.map(([k, v]) => opt(k, v, t.remind ?? '')).join('')}</select></label>
         <label class="lbl">Dự án<select class="field" name="projectId">${opt('', '— Không —', t.projectId)}${db.projects.filter(p => !p.archived).map(p => opt(p.id, p.name, t.projectId)).join('')}</select></label>
         <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" name="priority" ${t.priority ? 'checked' : ''}> ★ Quan trọng</label>
       </div>
@@ -135,15 +137,22 @@ function taskModal(task, preset = {}) {
       const upd = () => {
         const rep = form.repeat.value;
         form.status.disabled = rep !== 'none';
-        hint.textContent = rep !== 'none' ? `Lặp ${REPEAT_LABEL[rep].toLowerCase()} kể từ ngày làm (${form.date.value ? fmtDM(form.date.value) : 'hôm nay'}). Mỗi lần tick chỉ đánh dấu đúng ngày đó.` : '';
+        const parts = [];
+        if (rep !== 'none') parts.push(`Lặp ${REPEAT_LABEL[rep].toLowerCase()} kể từ ngày làm (${form.date.value ? fmtDM(form.date.value) : 'hôm nay'}). Mỗi lần tick chỉ đánh dấu đúng ngày đó.`);
+        if (form.remind.value !== '') {
+          if (!form.date.value && rep === 'none') parts.push('🔔 Chọn ngày làm để Vivian biết lúc nào reo chuông.');
+          else parts.push(`🔔 Reo ${remindShort(form.remind.value)}${form.time.value ? ` so với ${form.time.value}` : ` so với ${DEFAULT_HM} sáng (việc chưa có giờ)`}.`);
+        }
+        hint.textContent = parts.join(' ');
       };
-      form.repeat.addEventListener('change', upd); form.date.addEventListener('change', upd); upd();
+      ['repeat', 'date', 'time', 'remind'].forEach(n => form[n].addEventListener('change', upd)); upd();
     },
     onSubmit(fd) {
       const data = {
         title: (fd.get('title') || '').trim(), note: (fd.get('note') || '').trim(), cat: fd.get('cat'),
         date: fd.get('date') || '', time: fd.get('time') || '', deadline: fd.get('deadline') || '',
         repeat: fd.get('repeat'), projectId: fd.get('projectId') || '', priority: !!fd.get('priority'),
+        remind: fd.get('remind') === '' ? '' : Number(fd.get('remind')),
       };
       if (!data.title) { toast('Vân chưa nhập tên việc nè', { type: 'error' }); return false; }
       if (data.repeat !== 'none' && !data.date) data.date = today();
@@ -165,7 +174,7 @@ function taskModal(task, preset = {}) {
 /* ============ Modal: sự kiện ============ */
 function eventModal(ev, preset = {}) {
   const isNew = !ev;
-  const e = ev || { title: '', note: '', location: '', cat: ui.calFilter !== 'all' ? ui.calFilter : db.categories[0]?.id, date: preset.date || today(), endDate: '', allDay: false, start: '', end: '', repeat: 'none' };
+  const e = ev || { title: '', note: '', location: '', cat: ui.calFilter !== 'all' ? ui.calFilter : db.categories[0]?.id, date: preset.date || today(), endDate: '', allDay: false, start: '', end: '', repeat: 'none', remind: '' };
   openModal({
     title: isNew ? 'Sự kiện mới ☁' : 'Sửa sự kiện',
     body: `
@@ -179,6 +188,7 @@ function eventModal(ev, preset = {}) {
         <label class="lbl ev-time">Kết thúc<input class="field" type="time" name="end" value="${e.end || ''}"></label>
         <label class="lbl">Nhóm<select class="field" name="cat">${catOptions(e.cat)}</select></label>
         <label class="lbl">Lặp lại<select class="field" name="repeat">${Object.entries(REPEAT_LABEL).map(([k, v]) => opt(k, v, e.repeat)).join('')}</select></label>
+        <label class="lbl">Nhắc tôi<select class="field" name="remind">${REMIND_OPTS.map(([k, v]) => opt(k, v, e.remind ?? '')).join('')}</select></label>
       </div>
       <textarea class="field" name="note" rows="2" placeholder="Ghi chú thêm…">${esc(e.note || '')}</textarea>`,
     foot: `${isNew ? '' : `<button type="button" class="btn ghost danger-text" data-act="deleteEvent" data-id="${e.id}">${icon('trash', 15)} Xóa</button>`}
@@ -197,6 +207,7 @@ function eventModal(ev, preset = {}) {
         title: (fd.get('title') || '').trim(), location: (fd.get('location') || '').trim(), note: (fd.get('note') || '').trim(),
         cat: fd.get('cat'), date: fd.get('date') || '', endDate: fd.get('endDate') || '', repeat: fd.get('repeat') || 'none',
         allDay, start: allDay ? '' : fd.get('start') || '', end: allDay ? '' : fd.get('end') || '',
+        remind: fd.get('remind') === '' ? '' : Number(fd.get('remind')),
       };
       if (!data.title) { toast('Vân chưa nhập tên sự kiện nè', { type: 'error' }); return false; }
       if (!data.date) { toast('Chọn ngày cho sự kiện nhé', { type: 'error' }); return false; }
@@ -352,6 +363,7 @@ const ACT = {
   panelTab: el => { ui.panelTab = el.dataset.tab; render(); },
   expand: el => { ui.expanded[el.dataset.key] = !ui.expanded[el.dataset.key]; render(); },
   calFilter: el => { ui.calFilter = el.dataset.cat; render(); },
+  taskFilter: el => { ui.taskFilter = el.dataset.cat; render(); },
   calNav: el => { const d = new Date(ui.calY, ui.calM + Number(el.dataset.d), 1); ui.calY = d.getFullYear(); ui.calM = d.getMonth(); render(); },
   calToday: () => { const d = new Date(); ui.calY = d.getFullYear(); ui.calM = d.getMonth(); render(); },
 
@@ -421,6 +433,7 @@ const ACT = {
       db.tasks.forEach(t => { if (t.cat === c.id) t.cat = db.categories[0].id; });
       db.events.forEach(e => { if (e.cat === c.id) e.cat = db.categories[0].id; });
       if (ui.calFilter === c.id) ui.calFilter = 'all';
+      if (ui.taskFilter === c.id) ui.taskFilter = 'all';
       save(); render();
     }
   },
@@ -642,14 +655,40 @@ function tick() {
 }
 
 /* ============ Chuông nhắc việc ============ */
+const ALERT_GRACE = 2 * 3600e3; // mở trang trễ: chuông của việc/sự kiện chỉ reo bù trong 2 giờ
 function checkReminders() {
-  const t = today(), hm = nowHM();
+  const t = today(), hm = nowHM(), now = Date.now();
   let fired = false;
   db.reminders.forEach(r => {
     if (r.done || !occursOn(r, t)) return;
     if ((r.time || '00:00') <= hm && r.lastFired !== t) { r.lastFired = t; fired = true; fireReminder(r); }
   });
+  itemAlerts(now - ALERT_GRACE, now + 1).forEach(a => {
+    if (db.alerted[a.key]) return;
+    db.alerted[a.key] = a.date; fired = true; fireAlert(a);
+  });
+  const old = addDays(t, -3);
+  Object.keys(db.alerted).forEach(k => { if (db.alerted[k] < old) delete db.alerted[k]; });
   if (fired) { save(); renderNav(); if (ui.view === 'reminders' || ui.view === 'dashboard') render(); }
+}
+function alertText(a) {
+  const it = a.item;
+  const when = a.kind === 'event'
+    ? (a.hm ? `Sự kiện lúc ${a.hm}` : 'Sự kiện cả ngày')
+    : (a.hm ? `Việc lúc ${a.hm}` : 'Việc hôm nay');
+  const day = a.date === today() ? '' : ` ${relDay(a.date).toLowerCase()}`;
+  return `${when}${day}${it.location ? ' · ' + it.location : ''}`;
+}
+function fireAlert(a) {
+  const it = a.item;
+  Sound.chime();
+  toast(`${esc(it.title)} <small style="opacity:.7">· ${esc(alertText(a))}</small>`, {
+    iconName: a.kind === 'event' ? 'calendar' : 'bell', timeout: 15000,
+    action: a.kind === 'task' ? { label: 'Xong', fn: () => toggleTask(it.id, a.date) } : { label: 'Xem', fn: () => eventModal(it) },
+  });
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('Vivian nhắc Vân ☁', { body: `${it.title}\n${alertText(a)}`, tag: a.key }); } catch (e) { /* bỏ qua */ }
+  }
 }
 function fireReminder(r) {
   Sound.chime();
@@ -669,8 +708,8 @@ document.addEventListener('keydown', e => {
   if (typing || modalState || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === 'n') { e.preventDefault(); taskModal(null, { date: ui.view === 'dashboard' ? today() : '' }); }
   if (e.key === 'e') { e.preventDefault(); eventModal(null); }
-  if (e.key === 't' && ui.view === 'tasks') ACT.calToday();
-  if (ui.view === 'tasks' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) ACT.calNav({ dataset: { d: e.key === 'ArrowLeft' ? -1 : 1 } });
+  if (e.key === 't' && ui.view === 'calendar') ACT.calToday();
+  if (ui.view === 'calendar' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) ACT.calNav({ dataset: { d: e.key === 'ArrowLeft' ? -1 : 1 } });
 });
 
 /* ============ Khởi động ============ */

@@ -184,9 +184,10 @@ p { margin: 0; }
   padding: 10px 10px 30px; outline: none;
   scrollbar-width: thin; scrollbar-color: rgba(120, 130, 170, .35) transparent;
 }
-.main[data-view="tasks"] { overflow: hidden; display: flex; flex-direction: column; }
-.main[data-view="tasks"] .page-head { padding: 2px 6px 12px; }
-.main[data-view="tasks"] .page-head h1 { font-size: 2rem; }
+.main[data-view="tasks"], .main[data-view="calendar"] { overflow: hidden; display: flex; flex-direction: column; }
+.main[data-view="tasks"] .page-head, .main[data-view="calendar"] .page-head { padding: 2px 6px 12px; }
+.main[data-view="tasks"] .page-head h1, .main[data-view="calendar"] .page-head h1 { font-size: 2rem; }
+.main[data-view="calendar"] .cal { flex: 1; }
 
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
@@ -360,7 +361,14 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .habit-chip.on { background: var(--c); border-color: var(--c); color: #fff; }
 .habit-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* ---------------- Tasks (board + calendar) ---------------- */
+/* ---------------- Công việc (bảng) + Lịch ---------------- */
+.task-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+.task-bar .seg { flex: none; }
+.board { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.board .panel-scroll { margin-top: 0; }
+.board .group { margin-top: 0; min-height: 100%; }
+.routine-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; align-content: start; }
+.routine-grid .group { margin-top: 0; }
 .tasks-wrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px 1fr; gap: 14px; }
 .panel { border-radius: var(--r-xl); padding: 14px; display: flex; flex-direction: column; min-height: 0; }
 .panel .seg { width: 100%; }
@@ -651,7 +659,9 @@ tr:hover .hdel { opacity: 1; }
   .nav a { flex-direction: column; gap: 3px; padding: 7px 9px; font-size: .62rem; min-width: 58px; }
   .nav a .badge { position: absolute; top: 2px; right: 6px; margin: 0; min-width: 16px; height: 16px; font-size: .6rem; }
   .main { overflow: visible; padding: 4px 4px 20px; }
-  .main[data-view="tasks"] { overflow: visible; display: block; }
+  .main[data-view="tasks"], .main[data-view="calendar"] { overflow: visible; display: block; }
+  .board { grid-template-columns: 1fr; }
+  .board .panel { max-height: none; }
   .page-head h1 { font-size: 1.85rem; }
   .tasks-wrap { grid-template-columns: 1fr; }
   .panel { max-height: 420px; }
@@ -693,3 +703,7 @@ tr:hover .hdel { opacity: 1; }
 @keyframes syncPulse { 50% { opacity: .3; } }
 .sync-line[data-state="error"] { color: #d0507a; }
 @media (max-width: 860px) { .sync-badge { display: none; } }
+
+/* Danh sách chuông: chuông đã reo hôm nay mờ đi */
+.rem-row.past { opacity: .5; }
+.rem-row.bell .rem-ic { background: color-mix(in srgb, var(--c) 14%, transparent); }
