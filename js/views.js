@@ -77,7 +77,7 @@ Views.dashboard = () => {
     const d = addDays(t, i), items = dayItems(d, 'all', true);
     return `<div class="wday ${i === 0 ? 'is-today' : ''}" data-act="openDay" data-date="${d}">
       <div class="wday-h"><span>${i === 0 ? 'Hôm nay' : WD_SHORT[weekdayIdx(d)]}</span><b>${parseYmd(d).getDate()}</b></div>
-      ${items.slice(0, 4).map(it => calPill(it)).join('')}
+      ${items.slice(0, 4).map(it => calPill(it, d)).join('')}
       ${items.length > 4 ? `<span class="more">+${items.length - 4} mục khác</span>` : ''}
     </div>`;
   }).join('');
@@ -132,20 +132,19 @@ Views.dashboard = () => {
     </div>
 
     <section class="glass card d-week">
-      <div class="card-head"><h3>${icon('calendar', 18)} 7 ngày tới</h3><a class="link-btn" href="#/tasks">Mở lịch tháng →</a></div>
+      <div class="card-head"><h3>${icon('calendar', 18)} Sự kiện 7 ngày tới</h3><a class="link-btn" href="#/tasks">Mở lịch tháng →</a></div>
       <div class="week">${week}</div>
     </section>
   </div>`;
 };
 
-/* =================== CÔNG VIỆC: bảng + lịch tháng =================== */
-function calPill(it) {
-  if (it.kind === 'task') {
-    const c = colorOf(catOf(it.task.cat).color);
-    return `<div class="pill ${it.done ? 'done' : ''}" style="--c:${c}" draggable="true" data-drag-task="${it.task.id}" data-act="editTask" data-id="${it.task.id}" title="${esc(it.task.title)}">${it.task.priority ? '★ ' : ''}${it.task.time ? `<b>${it.task.time}</b> ` : ''}${esc(it.task.title)}</div>`;
-  }
-  if (it.kind === 'due') {
-    return `<div class="due" data-act="editTask" data-id="${it.task.id}" title="Hạn chót: ${esc(it.task.title)}"><span class="bang">!</span><div><small>Hạn chót</small><span>${esc(it.task.title)}</span></div></div>`;
+/* =================== CÔNG VIỆC: bảng việc + lịch sự kiện =================== */
+function calPill(it, d) {
+  if (it.kind === 'event') {
+    const e = it.ev, c = colorOf(catOf(e.cat).color), tm = eventTime(e, d);
+    const multi = !isRepeat(e) && e.endDate && e.endDate > e.date;
+    const tip = `${e.title}${tm ? ' · ' + tm : ''}${e.location ? ' · ' + e.location : ''}`;
+    return `<div class="pill ev ${tm ? '' : 'allday'}" style="--c:${c}" draggable="true" data-drag-event="${e.id}" data-from="${d}" data-act="editEvent" data-id="${e.id}" title="${esc(tip)}">${tm ? `<b>${e.start}</b> ` : ''}${multi && d !== e.date ? '↳ ' : ''}${esc(e.title)}</div>`;
   }
   return `<div class="rem-pill" data-act="editRem" data-id="${it.rem.id}" title="Nhắc: ${esc(it.rem.title)}">${icon('bell', 11, 2.2)}${it.rem.time ? it.rem.time + ' ' : ''}${esc(it.rem.title)}</div>`;
 }
@@ -203,8 +202,8 @@ Views.tasks = () => {
     const items = dayItems(d, f, db.settings.calRem);
     // vẽ hết, sau đó fitCells() đo chiều cao thật của ô và gom phần dư thành "+n mục khác"
     cells += `<div class="cell ${dt.getMonth() !== m ? 'out' : ''} ${d === td ? 'today' : ''} ${weekdayIdx(d) === 6 ? 'weekend' : ''}" data-drop-date="${d}">
-      <div class="cell-top"><button type="button" class="cell-add" data-act="newTask" data-date="${d}" aria-label="Thêm việc ngày ${fmtDM(d)}">${icon('plus', 14, 2.2)}</button><span class="dnum" data-act="openDay" data-date="${d}" style="cursor:pointer">${dt.getDate()}</span></div>
-      <div class="cell-items" data-date="${d}">${items.map(calPill).join('')}</div>
+      <div class="cell-top"><button type="button" class="cell-add" data-act="newEvent" data-date="${d}" aria-label="Thêm sự kiện ngày ${fmtDM(d)}">${icon('plus', 14, 2.2)}</button><span class="dnum" data-act="openDay" data-date="${d}" style="cursor:pointer">${dt.getDate()}</span></div>
+      <div class="cell-items" data-date="${d}">${items.map(it => calPill(it, d)).join('')}</div>
     </div>`;
   }
 
@@ -228,6 +227,7 @@ Views.tasks = () => {
           <span class="lbl-m">Tháng ${m + 1}</span>
           <button type="button" class="icon-btn" data-act="calNav" data-d="1" aria-label="Tháng sau">${icon('right')}</button>
           <button type="button" class="btn ghost sm" data-act="calToday">Hôm nay</button>
+          <button type="button" class="btn primary sm" data-act="newEvent">${icon('plus', 14)} Sự kiện</button>
         </div>
       </div>
       <div class="cal-wd">${WD_LONG.map((w, i) => `<div><span class="wl">${w}</span><span class="ws">${WD_SHORT[i]}</span></div>`).join('')}</div>
@@ -611,6 +611,9 @@ function runSelfTests() {
   eq('Lặp năm: kỷ niệm 29/2 → 28/2 năm thường', occursOn({ date: '2028-02-29', repeat: 'yearly' }, '2029-02-28'), true);
   eq('Tháng sau của 12/2026 là 01/2027', addMonths('2026-12', 1), '2027-01');
   eq('Đọc tiền "1.500.000"', parseMoney('1.500.000'), 1500000);
-  eq('Việc lặp tick riêng từng ngày', isDone({ repeat: 'daily', doneDates: [t] }, addDays(t, -1)), false);
+  eq('Sự kiện 30/11 → 2/12 có mặt ngày 1/12', eventOccursOn({ date: '2026-11-30', endDate: '2026-12-02', repeat: 'none' }, '2026-12-01'), true);
+  eq('Sự kiện 30/11 → 2/12 không có ngày 3/12', eventOccursOn({ date: '2026-11-30', endDate: '2026-12-02', repeat: 'none' }, '2026-12-03'), false);
+  eq('Sự kiện lặp tuần rơi đúng thứ', eventOccursOn({ date: '2026-11-02', endDate: '', repeat: 'weekly' }, '2026-11-16'), true);
+  eq('Việc lặp tick riêng từng ngày',isDone({ repeat: 'daily', doneDates: [t] }, addDays(t, -1)), false);
   return r;
 }

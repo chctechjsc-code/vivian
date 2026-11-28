@@ -162,18 +162,70 @@ function taskModal(task, preset = {}) {
   });
 }
 
+/* ============ Modal: sự kiện ============ */
+function eventModal(ev, preset = {}) {
+  const isNew = !ev;
+  const e = ev || { title: '', note: '', location: '', cat: ui.calFilter !== 'all' ? ui.calFilter : db.categories[0]?.id, date: preset.date || today(), endDate: '', allDay: false, start: '', end: '', repeat: 'none' };
+  openModal({
+    title: isNew ? 'Sự kiện mới ☁' : 'Sửa sự kiện',
+    body: `
+      <input class="field big" name="title" placeholder="Sự kiện gì nè?" value="${esc(e.title)}" required autofocus autocomplete="off">
+      <input class="field" name="location" placeholder="Ở đâu? (tùy chọn)" value="${esc(e.location || '')}" autocomplete="off">
+      <div class="grid2">
+        <label class="lbl">Ngày<input class="field" type="date" name="date" value="${e.date}" required></label>
+        <label class="lbl">Đến ngày<input class="field" type="date" name="endDate" value="${e.endDate || ''}"></label>
+        <label class="check" style="grid-column:1/-1"><input type="checkbox" name="allDay" ${e.allDay ? 'checked' : ''}> Cả ngày</label>
+        <label class="lbl ev-time">Bắt đầu<input class="field" type="time" name="start" value="${e.start || ''}"></label>
+        <label class="lbl ev-time">Kết thúc<input class="field" type="time" name="end" value="${e.end || ''}"></label>
+        <label class="lbl">Nhóm<select class="field" name="cat">${catOptions(e.cat)}</select></label>
+        <label class="lbl">Lặp lại<select class="field" name="repeat">${Object.entries(REPEAT_LABEL).map(([k, v]) => opt(k, v, e.repeat)).join('')}</select></label>
+      </div>
+      <textarea class="field" name="note" rows="2" placeholder="Ghi chú thêm…">${esc(e.note || '')}</textarea>`,
+    foot: `${isNew ? '' : `<button type="button" class="btn ghost danger-text" data-act="deleteEvent" data-id="${e.id}">${icon('trash', 15)} Xóa</button>`}
+      <span class="sp"></span><button type="button" class="btn ghost" data-act="closeModal">Hủy</button><button type="submit" class="btn primary">${isNew ? 'Thêm sự kiện' : 'Lưu'}</button>`,
+    onMount(form) {
+      const upd = () => {
+        form.querySelectorAll('.ev-time').forEach(x => (x.style.display = form.allDay.checked ? 'none' : ''));
+        const rep = form.repeat.value !== 'none';
+        form.endDate.disabled = rep; if (rep) form.endDate.value = '';
+      };
+      form.allDay.addEventListener('change', upd); form.repeat.addEventListener('change', upd); upd();
+    },
+    onSubmit(fd) {
+      const allDay = !!fd.get('allDay');
+      const data = {
+        title: (fd.get('title') || '').trim(), location: (fd.get('location') || '').trim(), note: (fd.get('note') || '').trim(),
+        cat: fd.get('cat'), date: fd.get('date') || '', endDate: fd.get('endDate') || '', repeat: fd.get('repeat') || 'none',
+        allDay, start: allDay ? '' : fd.get('start') || '', end: allDay ? '' : fd.get('end') || '',
+      };
+      if (!data.title) { toast('Vân chưa nhập tên sự kiện nè', { type: 'error' }); return false; }
+      if (!data.date) { toast('Chọn ngày cho sự kiện nhé', { type: 'error' }); return false; }
+      if (data.repeat !== 'none' || data.endDate === data.date) data.endDate = '';
+      if (data.endDate && data.endDate < data.date) { toast('“Đến ngày” đang trước ngày bắt đầu — kiểm tra lại nhé', { type: 'error' }); return false; }
+      if (!data.start) data.end = '';
+      if (data.start && data.end && !data.endDate && data.end < data.start) { toast('Giờ kết thúc đang trước giờ bắt đầu', { type: 'error' }); return false; }
+      if (isNew) { db.events.push({ id: uid(), ...data, archived: false, createdAt: Date.now() }); toast('Đã thêm sự kiện ☁', { iconName: 'check' }); }
+      else Object.assign(ev, data);
+      save(); render();
+    },
+  });
+}
+
 /* ============ Modal: một ngày ============ */
 function dayModal(d) {
   const items = dayItems(d, 'all', 'all');
   const body = items.length ? items.map(it => {
-    if (it.kind === 'task') return taskRow(it.task, d);
-    if (it.kind === 'due') return taskRow(it.task, d, { meta: ' · <span class="late">Hạn chót hôm đó</span>' });
+    if (it.kind === 'event') {
+      const e = it.ev, c = colorOf(catOf(e.cat).color), tm = eventTime(e, d);
+      const meta = [tm || 'Cả ngày', e.location && esc(e.location), isRepeat(e) && REPEAT_SHORT[e.repeat], esc(catOf(e.cat).name)].filter(Boolean).join(' · ');
+      return `<div class="trow" data-act="editEvent" data-id="${e.id}"><span class="rem-ic" style="width:26px;height:26px;border-radius:8px;color:${c}">${icon('calendar', 14)}</span><div class="trow-main"><div class="trow-title">${esc(e.title)}</div><div class="trow-meta">${meta}</div></div></div>`;
+    }
     return `<div class="trow" data-act="editRem" data-id="${it.rem.id}"><span class="rem-ic" style="width:26px;height:26px;border-radius:8px">${icon('bell', 14)}</span><div class="trow-main"><div class="trow-title">${esc(it.rem.title)}</div><div class="trow-meta">Nhắc lúc ${it.rem.time || '—'}${isRepeat(it.rem) ? ' · ' + REPEAT_SHORT[it.rem.repeat] : ''}</div></div></div>`;
   }).join('') : emptyState('Ngày này còn trống.');
   openModal({
     title: `${relDay(d) === fmtDM(d) ? '' : relDay(d) + ' · '}${fmtLong(d)}`,
     body: `<div>${body}</div>`,
-    foot: `<button type="button" class="btn ghost" data-act="newRem" data-date="${d}">${icon('bell', 15)} Thêm nhắc</button><span class="sp"></span><button type="button" class="btn primary" data-act="newTask" data-date="${d}">${icon('plus', 15)} Thêm việc</button>`,
+    foot: `<button type="button" class="btn ghost" data-act="newRem" data-date="${d}">${icon('bell', 15)} Thêm nhắc</button><span class="sp"></span><button type="button" class="btn primary" data-act="newEvent" data-date="${d}">${icon('plus', 15)} Thêm sự kiện</button>`,
     refresh: () => dayModal(d),
   });
 }
@@ -288,6 +340,15 @@ const ACT = {
   archiveTask: el => { const t = taskById(el.dataset.id); if (!t) return; t.archived = true; save(); closeModal(); render(); toast('Đã cất vào lưu trữ', { action: { label: 'Hoàn tác', fn: () => { t.archived = false; save(); render(); } } }); },
   archiveDone: () => { const list = db.tasks.filter(t => !t.archived && !isRepeat(t) && t.status === 'done'); list.forEach(t => t.archived = true); save(); render(); toast(`Đã cất ${list.length} việc`, { action: { label: 'Hoàn tác', fn: () => { list.forEach(t => t.archived = false); save(); render(); } } }); },
   openDay: el => dayModal(el.dataset.date),
+  newEvent: el => eventModal(null, { date: el.dataset.date }),
+  editEvent: el => { const e = eventById(el.dataset.id); e && eventModal(e); },
+  deleteEvent: async el => {
+    const e = eventById(el.dataset.id); if (!e) return;
+    if (await confirmBox(`Xóa sự kiện “${esc(e.title)}”?`, { ok: 'Xóa', danger: true })) {
+      db.events = db.events.filter(x => x !== e); save(); closeModal(); render();
+      toast('Đã xóa sự kiện', { action: { label: 'Hoàn tác', fn: () => { db.events.push(e); save(); render(); } } });
+    }
+  },
   panelTab: el => { ui.panelTab = el.dataset.tab; render(); },
   expand: el => { ui.expanded[el.dataset.key] = !ui.expanded[el.dataset.key]; render(); },
   calFilter: el => { ui.calFilter = el.dataset.cat; render(); },
@@ -358,6 +419,7 @@ const ACT = {
     if (await confirmBox(`Xóa nhóm “${esc(c.name)}”?${n ? ` ${n} việc trong nhóm sẽ chuyển sang “${esc(db.categories.find(x => x.id !== c.id).name)}”.` : ''}`, { ok: 'Xóa', danger: true })) {
       db.categories = db.categories.filter(x => x.id !== c.id);
       db.tasks.forEach(t => { if (t.cat === c.id) t.cat = db.categories[0].id; });
+      db.events.forEach(e => { if (e.cat === c.id) e.cat = db.categories[0].id; });
       if (ui.calFilter === c.id) ui.calFilter = 'all';
       save(); render();
     }
@@ -398,17 +460,25 @@ function authMsg(e) {
   if (/Password should be at least/i.test(m)) return 'Mật khẩu cần ít nhất 6 ký tự';
   if (/rate limit|too many/i.test(m)) return 'Thử nhiều lần quá — đợi một lát rồi thử lại';
   if (/Failed to fetch|NetworkError/i.test(m)) return 'Không kết nối được máy chủ — kiểm tra mạng';
+  if (/only request this after|security purposes/i.test(m)) return 'Vừa gửi email rồi — đợi khoảng 1 phút rồi bấm lại nhé';
+  if (/should be different/i.test(m)) return 'Mật khẩu mới phải khác mật khẩu cũ';
+  if (/session missing|not authenticated|JWT/i.test(m)) return 'Phiên đặt lại mật khẩu đã hết — bấm “Quên mật khẩu?” để nhận link mới';
+  if (/sending.*email|send.*email|smtp/i.test(m)) return 'Máy chủ chưa gửi được email — xem lại cấu hình email của Supabase';
   return m;
 }
 function newPasswordModal() {
   openModal({
     title: 'Đặt mật khẩu mới', size: 'sm',
-    body: `<label class="lbl">Mật khẩu mới<input class="field" name="pw" type="password" minlength="6" autocomplete="new-password" required autofocus></label>`,
+    body: `<p class="muted small">Đang đặt lại mật khẩu cho <b>${esc(Cloud.user?.email || '')}</b>.</p>
+      <label class="lbl">Mật khẩu mới<input class="field" name="pw" type="password" minlength="6" autocomplete="new-password" required autofocus></label>
+      <label class="lbl">Nhập lại mật khẩu mới<input class="field" name="pw2" type="password" minlength="6" autocomplete="new-password" required></label>`,
     foot: `<span class="sp"></span><button type="submit" class="btn primary">Lưu mật khẩu</button>`,
     onSubmit: fd => {
       const pw = fd.get('pw');
       if (!pw || pw.length < 6) { toast('Mật khẩu cần ít nhất 6 ký tự', { type: 'error' }); return false; }
-      Cloud.updatePassword(pw).then(() => toast('Đã đổi mật khẩu ✓')).catch(e => toast(authMsg(e), { type: 'error' }));
+      if (pw !== fd.get('pw2')) { toast('Hai mật khẩu chưa khớp nhau', { type: 'error' }); return false; }
+      Cloud.updatePassword(pw).then(() => { toast('Đã đổi mật khẩu ✓ Lần sau đăng nhập bằng mật khẩu mới nhé', { timeout: 6000 }); render(); })
+        .catch(e => { toast(authMsg(e), { type: 'error', timeout: 6000 }); if (!/session|JWT|authenticated/i.test(e?.message || '')) setTimeout(newPasswordModal, 400); });
     },
   });
 }
@@ -475,29 +545,37 @@ document.addEventListener('submit', e => { const fn = SUBMIT[e.target.dataset.su
 document.addEventListener('input', e => { const fn = INPUT[e.target.dataset.input]; fn && fn(e.target); });
 document.addEventListener('change', e => { const fn = CHANGE[e.target.dataset.change]; fn && fn(e.target); });
 
-/* ============ Kéo thả việc lên lịch / sang trạng thái khác ============ */
-let dragOver = null;
+/* ============ Kéo thả: việc sang trạng thái khác, sự kiện sang ngày khác ============ */
+let dragOver = null, dragKind = '';
 document.addEventListener('dragstart', e => {
-  const el = e.target.closest && e.target.closest('[data-drag-task]'); if (!el) return;
-  e.dataTransfer.setData('text/plain', el.dataset.dragTask); e.dataTransfer.effectAllowed = 'move';
+  const el = e.target.closest && e.target.closest('[data-drag-task],[data-drag-event]'); if (!el) return;
+  dragKind = el.dataset.dragEvent ? 'event' : 'task';
+  const payload = dragKind === 'event' ? `ev:${el.dataset.dragEvent}:${el.dataset.from || ''}` : el.dataset.dragTask;
+  e.dataTransfer.setData('text/plain', payload); e.dataTransfer.effectAllowed = 'move';
   el.classList.add('dragging'); document.body.classList.add('is-dragging');
 });
+const dropSel = () => dragKind === 'event' ? '[data-drop-date]' : '[data-drop-status]';
 document.addEventListener('dragend', () => { $$('.dragging').forEach(x => x.classList.remove('dragging')); document.body.classList.remove('is-dragging'); dragOver && dragOver.classList.remove('over'); dragOver = null; });
 document.addEventListener('dragover', e => {
-  const z = e.target.closest && e.target.closest('[data-drop-date],[data-drop-status]'); if (!z) return;
+  const z = e.target.closest && e.target.closest(dropSel()); if (!z) return;
   e.preventDefault();
   if (z !== dragOver) { dragOver && dragOver.classList.remove('over'); z.classList.add('over'); dragOver = z; }
 });
 document.addEventListener('drop', e => {
   const z = e.target.closest && e.target.closest('[data-drop-date],[data-drop-status]'); if (!z) return;
   e.preventDefault();
-  const t = taskById(e.dataTransfer.getData('text/plain')); if (!t) return;
-  if (z.dataset.dropDate) {
-    const d = z.dataset.dropDate; if (t.date === d) return;
-    t.date = d;
-    if (t.deadline && t.deadline < d) { t.deadline = d; toast('Hạn chót cũng được dời theo cho khớp'); }
-    toast(`Đã chuyển “${esc(t.title)}” sang ${relDay(d).toLowerCase()} (${fmtDM(d)})`);
-  } else if (z.dataset.dropStatus && !isRepeat(t)) {
+  const raw = e.dataTransfer.getData('text/plain');
+  if (raw.startsWith('ev:')) {
+    const [, id, from] = raw.split(':'), ev = eventById(id), d = z.dataset.dropDate;
+    if (!ev || !d) return;
+    const shift = diffDays(from || ev.date, d); if (!shift) return;
+    ev.date = addDays(ev.date, shift);
+    if (ev.endDate) ev.endDate = addDays(ev.endDate, shift);
+    toast(`Đã dời “${esc(ev.title)}” sang ${relDay(ev.date).toLowerCase()} (${fmtDM(ev.date)})`);
+    save(); render(); return;
+  }
+  const t = taskById(raw); if (!t) return;
+  if (z.dataset.dropStatus && !isRepeat(t)) {
     const s = z.dataset.dropStatus; if (t.status === s) return;
     t.status = s; t.doneAt = s === 'done' ? Date.now() : null;
     if (s === 'done') cheer();
@@ -590,6 +668,7 @@ document.addEventListener('keydown', e => {
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
   if (typing || modalState || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === 'n') { e.preventDefault(); taskModal(null, { date: ui.view === 'dashboard' ? today() : '' }); }
+  if (e.key === 'e') { e.preventDefault(); eventModal(null); }
   if (e.key === 't' && ui.view === 'tasks') ACT.calToday();
   if (ui.view === 'tasks' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) ACT.calNav({ dataset: { d: e.key === 'ArrowLeft' ? -1 : 1 } });
 });

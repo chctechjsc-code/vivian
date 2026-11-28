@@ -14,6 +14,7 @@ const Cloud = (() => {
   let rev = 0;               // tăng mỗi lần dữ liệu trên máy thay đổi
   let status = 'off';        // off | out | syncing | ok | error | offline
   let lastAt = 0, lastErr = '';
+  let recovering = false, recoveryShown = false; // đang mở từ link "đặt lại mật khẩu" trong email
 
   const configured = () => !!(cfg.url && cfg.anonKey);
   const meta = () => { try { return JSON.parse(localStorage.getItem(META_KEY)) || {}; } catch (e) { return {}; } };
@@ -46,6 +47,12 @@ const Cloud = (() => {
   async function init() {
     if (!configured()) { setStatus('off'); return; }
     if (!window.supabase?.createClient) { setStatus('offline', 'Không tải được thư viện Supabase'); return; }
+    // Đọc link email TRƯỚC khi thư viện xử lý và xóa nó khỏi thanh địa chỉ
+    const hp = new URLSearchParams(location.hash.replace(/^#\/?/, '').replace(/^[^#]*#/, ''));
+    const qp = new URLSearchParams(location.search);
+    recovering = hp.get('type') === 'recovery' || qp.get('type') === 'recovery';
+    const linkErr = hp.get('error_description') || qp.get('error_description');
+    if (linkErr) setTimeout(() => showLinkError(linkErr, hp.get('error_code') || qp.get('error_code')), 400);
     sb = window.supabase.createClient(cfg.url, cfg.anonKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'vivian.auth' },
     });
@@ -53,13 +60,16 @@ const Cloud = (() => {
       const u = session?.user || null;
       const changed = (u?.id || null) !== (user?.id || null);
       user = u;
-      if (ev === 'PASSWORD_RECOVERY') setTimeout(() => typeof newPasswordModal === 'function' && newPasswordModal(), 300);
+      if (ev === 'PASSWORD_RECOVERY') recovering = true;
       if (!user) { setStatus('out'); return; }
+      if (recovering) { showRecovery(); return; }   // đặt mật khẩu mới trước, đồng bộ sau
       if (changed) { cleanHash(); sync(); }
     });
     const { data } = await sb.auth.getSession();
     user = data.session?.user || null;
-    if (!user) setStatus('out'); else sync();
+    if (!user) setStatus('out');
+    else if (recovering) showRecovery();
+    else sync();
 
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); else flush(); });
     window.addEventListener('online', () => sync());
@@ -67,8 +77,27 @@ const Cloud = (() => {
     window.addEventListener('pagehide', flush);
     setInterval(() => { if (document.visibilityState === 'visible') sync(); }, 45000);
   }
-  // Link xác nhận email trả về dạng #access_token=… → đưa về trang Cài đặt
-  function cleanHash() {
+  function showRecovery() {
+    if (recoveryShown) return;
+    recoveryShown = true;
+    cleanHash(true);
+    setStatus('ok');
+    setTimeout(() => typeof newPasswordModal === 'function' && newPasswordModal(), 300);
+  }
+  function showLinkError(msg, code) {
+    cleanHash(true);
+    const expired = code === 'otp_expired' || /expired|invalid/i.test(msg);
+    typeof toast === 'function' && toast(expired
+      ? 'Link trong email đã hết hạn hoặc đã được dùng. Nhập email rồi bấm “Quên mật khẩu?” để nhận link mới (mở link trong vòng 1 giờ, chỉ bấm 1 lần).'
+      : 'Link trong email không dùng được: ' + msg, { type: 'error', timeout: 12000 });
+  }
+  // Link trong email trả về dạng #access_token=… / #error=… → đưa về trang Cài đặt
+  function cleanHash(force) {
+    if (force) {
+      history.replaceState(null, '', location.pathname + '#/settings');
+      typeof route === 'function' && route();
+      return;
+    }
     if (/access_token|error_description|type=signup/.test(location.hash)) {
       history.replaceState(null, '', location.pathname + '#/settings');
       typeof route === 'function' && route();
@@ -195,12 +224,16 @@ const Cloud = (() => {
     return !data.session; // true = cần bấm link xác nhận trong email
   }
   async function resetPassword(email) {
-    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: redirect() + '#/settings' });
+    // redirectTo phải TRÙNG địa chỉ đã khai trong Supabase → Authentication → URL Configuration.
+    // Không gắn thêm "#/settings": phần # sẽ va với mã đăng nhập Supabase gắn vào link.
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: redirect() });
     if (error) throw error;
   }
   async function updatePassword(password) {
     const { error } = await sb.auth.updateUser({ password });
     if (error) throw error;
+    recovering = false;
+    sync();
   }
   async function signOut() {
     await flush();
@@ -211,6 +244,6 @@ const Cloud = (() => {
 
   return {
     init, touched, sync, signIn, signUp, signOut, resetPassword, updatePassword,
-    configured, mergeDocs, get user() { return user; }, get status() { return status; }, get lastAt() { return lastAt; }, get error() { return lastErr; },
+    configured, mergeDocs, get recovering() { return recovering; }, get user() { return user; }, get status() { return status; }, get lastAt() { return lastAt; }, get error() { return lastErr; },
   };
 })();

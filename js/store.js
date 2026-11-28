@@ -52,7 +52,7 @@ function defaultCats() {
 function emptyDB() {
   return {
     version: 1, settings: defaultSettings(), categories: defaultCats(),
-    tasks: [], reminders: [], transactions: [], notes: [], projects: [], habits: [], focusLog: {}, quick: '',
+    tasks: [], events: [], reminders: [], transactions: [], notes: [], projects: [], habits: [], focusLog: {}, quick: '',
   };
 }
 
@@ -106,14 +106,27 @@ function overdueTasks() {
     .filter(x => !isRepeat(x) && x.status !== 'done' && dueKey(x) && dueKey(x) < t)
     .sort((a, b) => dueKey(a).localeCompare(dueKey(b)));
 }
-/** Mọi thứ hiển thị trong 1 ô lịch, đã sắp xếp */
+/* Sự kiện (lịch): có thể kéo dài nhiều ngày (date → endDate) hoặc lặp lại */
+const eventById = id => db.events.find(e => e.id === id);
+function eventOccursOn(e, d) {
+  if (isRepeat(e)) return occursOn(e, d);
+  return !!e.date && d >= e.date && d <= (e.endDate && e.endDate > e.date ? e.endDate : e.date);
+}
+function eventsOn(d) { return db.events.filter(e => !e.archived && eventOccursOn(e, d)); }
+/** Giờ hiển thị của sự kiện trong ngày d ('' = cả ngày) */
+function eventTime(e, d) {
+  if (e.allDay || !e.start) return '';
+  if (!isRepeat(e) && e.endDate && e.endDate > e.date && d !== e.date) return '';
+  return e.start + (e.end ? '–' + e.end : '');
+}
+
+/** Mọi thứ hiển thị trong 1 ô lịch (sự kiện + nhắc), đã sắp xếp */
 function dayItems(d, filter = 'all', withRem = true) {
   const items = [];
-  const ok = t => filter === 'all' || t.cat === filter;
-  tasksOn(d).forEach(({ task, done }) => ok(task) && items.push({ kind: 'task', task, done, rank: done ? 4 : task.priority ? 0 : isRepeat(task) ? 2.5 : 1, time: task.time || '99' }));
-  dueOn(d).forEach(task => ok(task) && items.push({ kind: 'due', task, rank: 2, time: '00' }));
+  const ok = x => filter === 'all' || x.cat === filter;
+  eventsOn(d).forEach(ev => ok(ev) && items.push({ kind: 'event', ev, rank: eventTime(ev, d) ? 1 : 0, time: eventTime(ev, d) ? ev.start : '00' }));
   // nhắc hằng ngày / ngày thường lặp quá dày nên không vẽ lên lịch
-  if (withRem) db.reminders.filter(r => !r.done && (withRem === 'all' || (r.repeat !== 'daily' && r.repeat !== 'weekdays')) && occursOn(r, d)).forEach(r => items.push({ kind: 'rem', rem: r, rank: 3, time: r.time || '99' }));
+  if (withRem) db.reminders.filter(r => !r.done && (withRem === 'all' || (r.repeat !== 'daily' && r.repeat !== 'weekdays')) && occursOn(r, d)).forEach(r => items.push({ kind: 'rem', rem: r, rank: 1, time: r.time || '99' }));
   return items.sort((a, b) => a.rank - b.rank || a.time.localeCompare(b.time));
 }
 function doneTodayCount() {
@@ -201,6 +214,20 @@ function seedDB() {
   // vài việc lặp đã tick những ngày trước
   d.tasks[2].doneDates = [D(-1), D(-2), D(-3), D(-5)];
   d.tasks[3].doneDates = [D(-1), D(-2), D(-4)];
+
+  const E = (title, cat, date, extra = {}) => ({
+    id: uid(), title, note: '', location: '', cat, date, endDate: '', allDay: false, start: '', end: '',
+    repeat: 'none', archived: false, createdAt: Date.now(), ...extra,
+  });
+  d.events = [
+    E('Họp nhóm dự án', 'work', D(0), { start: '14:30', end: '15:30', location: 'Phòng họp tầng 3' }),
+    E('Cà phê với Linh', 'self', D(2), { start: '17:00', end: '18:30', location: 'The Coffee House' }),
+    E('Khám răng', 'health', D(3), { start: '09:00', end: '10:00', location: 'Nha khoa Kim' }),
+    E('Sinh nhật bạn Linh 🎂', 'self', D(8), { allDay: true }),
+    E('Lớp tiếng Hàn', 'study', D(-12), { start: '19:00', end: '20:30', repeat: 'weekly' }),
+    E('Đà Lạt săn mây ☁', 'love', D(20), { endDate: D(23), allDay: true, location: 'Đà Lạt' }),
+    E('Hội thảo thiết kế', 'work', D(12), { start: '08:30', end: '11:30', location: 'GEM Center' }),
+  ];
 
   const hm = nowHM();
   const R = (title, date, time, repeat = 'none', note = '') => ({ id: uid(), title, note, date, time, repeat, done: false, lastFired: (date === t && time <= hm) || date < t ? t : '' , createdAt: Date.now() });

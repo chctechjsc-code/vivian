@@ -434,6 +434,11 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .pill b { font-weight: 800; opacity: .85; }
 .pill.done { opacity: .42; text-decoration: line-through; box-shadow: none; }
 .pill:hover { filter: brightness(1.08); }
+/* Sự kiện có giờ: nền nhạt + vạch màu bên trái; sự kiện cả ngày: thanh đặc màu */
+.pill.ev:not(.allday) { color: var(--ink); background: color-mix(in srgb, var(--c) 18%, rgba(255, 255, 255, .7)); border-left: 3px solid var(--c); padding-left: 5px; box-shadow: none; }
+.pill.ev:not(.allday) b { color: var(--c); opacity: 1; }
+[data-mode="dark"] .pill.ev:not(.allday) { color: #fff; background: color-mix(in srgb, var(--c) 35%, rgba(20, 26, 48, .6)); }
+[data-mode="dark"] .pill.ev:not(.allday) b { color: #fff; }
 .due {
   display: flex; align-items: center; gap: 6px; flex: none; cursor: pointer;
   background: var(--danger-soft); border-radius: 7px; padding: 3px 7px; min-width: 0;
